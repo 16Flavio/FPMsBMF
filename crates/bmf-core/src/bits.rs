@@ -135,10 +135,7 @@ impl BitVec {
 
     // Permet de compter le nombre de 1 dans la séquence de bit
     pub fn count_ones(&self) -> usize {
-        self.data
-            .iter()
-            .map(|w| w.count_ones() as usize)
-            .sum::<usize>()
+        self.data.iter().map(|w| w.count_ones() as usize).sum()
     }
 
     // Permet de calculer le nombre d'entrées différentes entre deux séquences de bit
