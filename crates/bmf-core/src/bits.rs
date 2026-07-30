@@ -3,11 +3,13 @@ use std::fmt;
 
 #[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub struct BitVec {
-    data: Vec<Word>,
-    n: usize,
+    // BitVec est un vecteur qui contient les mots pour représenter la chaine de bits
+    data: Vec<Word>, // vecteur de mots
+    n: usize,        // nombre de bits
 }
 
 impl BitVec {
+    // Constructeur pour construire la matrice remplie de 0
     pub fn zeros(n: usize) -> Self {
         Self {
             data: vec![0; words_for(n)],
@@ -15,6 +17,7 @@ impl BitVec {
         }
     }
 
+    // Constructeur pour construire la matrice remplie de 1
     pub fn ones(n: usize) -> Self {
         let mut data = vec![Word::MAX; words_for(n)];
 
@@ -27,6 +30,7 @@ impl BitVec {
         v
     }
 
+    // Constructeur pour construire la matrice à partir d'une liste de booléen
     pub fn from_bools(bools: &[bool]) -> Self {
         let n = bools.len();
 
@@ -41,18 +45,22 @@ impl BitVec {
         bitvec
     }
 
+    // Renvoie le nombre de bit stocké
     pub fn len(&self) -> usize {
         self.n
     }
 
+    // Renvoie un booléen true si la liste est vide, false à l'inverse
     pub fn is_empty(&self) -> bool {
         self.n == 0
     }
 
+    // Renvoie en "brut" la liste de mots
     pub fn as_words(&self) -> &[Word] {
         &self.data
     }
 
+    // Permet d'accéder au bit i
     pub fn get(&self, i: usize) -> bool {
         assert!(i < self.n, "index {i} hors limites (len = {})", self.n);
         let word_idx = word_index(i);
@@ -60,6 +68,7 @@ impl BitVec {
         (self.data[word_idx] & mask) != 0
     }
 
+    // Permet de changer la valeur du bit i
     pub fn set(&mut self, i: usize, value: bool) {
         assert!(i < self.n, "index {i} hors limites (len = {})", self.n);
         let word_idx = word_index(i);
@@ -71,6 +80,7 @@ impl BitVec {
         }
     }
 
+    // Permet d'inverser la valeur d'un bit à la position i
     pub fn flip(&mut self, i: usize) {
         assert!(i < self.n, "index {i} hors limites (len = {})", self.n);
         let word_idx = word_index(i);
@@ -78,6 +88,7 @@ impl BitVec {
         self.data[word_idx] ^= mask;
     }
 
+    // Permet d'effectuer un OR entre deux séquences de bits, se réalise mot à mot, réel gain comparé au bit à bit
     pub fn or(&mut self, other: &BitVec) {
         assert_eq!(self.len(), other.len());
         for (a, b) in self.data.iter_mut().zip(other.data.iter()) {
@@ -86,6 +97,7 @@ impl BitVec {
         debug_assert!(self.is_canonical());
     }
 
+    // Permet d'effectuer un AND entre deux séquences de bits, se réalise mot à mot, réel gain comparé au bit à bit
     pub fn and(&mut self, other: &BitVec) {
         assert_eq!(self.len(), other.len());
         for (a, b) in self.data.iter_mut().zip(other.data.iter()) {
@@ -94,6 +106,7 @@ impl BitVec {
         debug_assert!(self.is_canonical());
     }
 
+    // Permet d'effectuer un XOR entre deux séquences de bits, se réalise mot à mot, réel gain comparé au bit à bit
     pub fn xor(&mut self, other: &BitVec) {
         assert_eq!(self.len(), other.len());
         for (a, b) in self.data.iter_mut().zip(other.data.iter()) {
@@ -102,6 +115,7 @@ impl BitVec {
         debug_assert!(self.is_canonical());
     }
 
+    // Permet d'effectuer un AND(NOT) entre deux séquences de bits, se réalise mot à mot, réel gain comparé au bit à bit
     pub fn andnot(&mut self, other: &BitVec) {
         assert_eq!(self.len(), other.len());
         for (a, b) in self.data.iter_mut().zip(other.data.iter()) {
@@ -110,6 +124,7 @@ impl BitVec {
         debug_assert!(self.is_canonical());
     }
 
+    // Permet d'effectuer un NOT entre deux séquences de bits, se réalise mot à mot, réel gain comparé au bit à bit
     pub fn invert(&mut self) {
         for a in self.data.iter_mut() {
             *a = !*a;
@@ -118,6 +133,7 @@ impl BitVec {
         debug_assert!(self.is_canonical());
     }
 
+    // Permet de compter le nombre de 1 dans la séquence de bit
     pub fn count_ones(&self) -> usize {
         self.data
             .iter()
@@ -125,6 +141,7 @@ impl BitVec {
             .sum::<usize>()
     }
 
+    // Permet de calculer le nombre d'entrées différentes entre deux séquences de bit
     pub fn hamming(&self, other: &BitVec) -> usize {
         assert_eq!(self.len(), other.len());
         self.data
@@ -134,6 +151,7 @@ impl BitVec {
             .sum::<usize>()
     }
 
+    // Fonction interne qui vérifie que les derniers bits du dernier mot valent 0, s'ils ne sont pas nécessaire
     fn is_canonical(&self) -> bool {
         if self.data.is_empty() {
             return true;
@@ -142,6 +160,7 @@ impl BitVec {
         (last_word & (!tail_mask(self.n))) == 0
     }
 
+    // Fonction interne qui permet d'afficher une séquence de bit
     fn display_seq_bit(&self, start: usize, end: usize, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for i in start..end {
             if self.get(i) {
