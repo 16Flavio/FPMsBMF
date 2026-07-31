@@ -6,10 +6,11 @@ use std::str::FromStr;
 pub enum Method {
     #[default]
     Naive,
+    Zeta,
 }
 
 impl Method {
-    pub const NAMES: &'static [&'static str] = &["naive"];
+    pub const NAMES: &'static [&'static str] = &["naive", "zeta"];
 }
 
 #[derive(Debug, Clone)]
@@ -34,6 +35,7 @@ impl FromStr for Method {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.trim().to_ascii_lowercase().as_str() {
             "naive" => Ok(Method::Naive),
+            "zeta" => Ok(Method::Zeta),
             _ => Err(InvalidMethod(s.to_string())),
         }
     }
@@ -87,6 +89,7 @@ impl BoolLs {
         );
         match method {
             Method::Naive => self.solve_naive(x),
+            Method::Zeta => self.solve_zeta(x),
         }
     }
 
@@ -106,6 +109,51 @@ impl BoolLs {
             if cost < best_cost {
                 best_h = h_cand;
                 best_cost = cost;
+            }
+        }
+
+        (best_h, best_cost)
+    }
+
+    fn solve_zeta(&self, x: &BitVec) -> (Word, usize) {
+        let r = self.r;
+        let m = self.m;
+
+        let mut best_cost: usize = m + 1;
+        let mut best_h = 0;
+        let mut d: Vec<i32> = self.cnt.iter().map(|&c| -(c as i32)).collect();
+
+        for (w, &word) in x.as_words().iter().enumerate() {
+            let mut bits = word;
+            while bits != 0 {
+                let l = w * NUMBER_OF_BITS + bits.trailing_zeros() as usize;
+                debug_assert!(l < m, "bit {l} hors de [0, {})", self.m);
+
+                d[self.patterns[l] as usize] += 2;
+
+                bits &= bits - 1;
+            }
+        }
+
+        for k in 0..r {
+            let bit = 1usize << k;
+            for mask in 0..(1usize << r) {
+                if mask & bit != 0 {
+                    d[mask] += d[mask ^ bit];
+                }
+            }
+        }
+
+        let b = m - x.count_ones();
+
+        let mask = (1 << r) - 1;
+
+        for h in 0..(1 << r) {
+            let cost = b as i32 + d[(!h) & mask];
+            debug_assert!(cost >= 0, "cout negatif {cost} pour h = {h}");
+            if (cost as usize) < best_cost {
+                best_cost = cost as usize;
+                best_h = h as u64;
             }
         }
 
@@ -223,9 +271,11 @@ mod tests {
             assert_eq!(cost_via_product(&w, &x, h), expected, "cout de h = {h}");
         }
 
-        let (h, cost) = solver.solve(&x, Method::Naive);
-        assert_eq!(cost, 3, "l'optimum vaut 3");
-        assert_eq!(h, 3, "atteint en selectionnant les deux colonnes");
+        for method in [Method::Naive, Method::Zeta] {
+            let (h, cost) = solver.solve(&x, method);
+            assert_eq!(cost, 3, "{method:?} : l'optimum vaut 3");
+            assert_eq!(h, 3, "{method:?} :  les deux colonnes");
+        }
     }
 
     #[test]
@@ -236,22 +286,23 @@ mod tests {
             vec![true, true],
             vec![false, false],
         ];
-        let w = matrix_from_rows(&rows);
         let x = BitVec::from_bools(&[false, true, true, false]);
+        let solver = BoolLs::new(&matrix_from_rows(&rows));
 
-        let (h, cost) = BoolLs::new(&w).solve(&x, Method::Naive);
-        assert_eq!(cost, 0, "x est une colonne de W");
-        assert_eq!(h, 2);
+        for method in [Method::Naive, Method::Zeta] {
+            assert_eq!(solver.solve(&x, method), (2, 0), "{method:?}");
+        }
     }
 
     #[test]
     fn zero_x_is_solved_by_zero_h() {
         let rows = vec![vec![true, true], vec![true, false], vec![false, true]];
         let x = BitVec::from_bools(&[false, false, false]);
+        let solver = BoolLs::new(&matrix_from_rows(&rows));
 
-        let (h, cost) = BoolLs::new(&matrix_from_rows(&rows)).solve(&x, Method::Naive);
-        assert_eq!(cost, 0);
-        assert_eq!(h, 0);
+        for method in [Method::Naive, Method::Zeta] {
+            assert_eq!(solver.solve(&x, method), (0, 0), "{method:?}");
+        }
     }
 
     #[test]
@@ -310,10 +361,11 @@ mod tests {
     fn ties_are_broken_by_smallest_h() {
         let rows = vec![vec![true, true], vec![false, false], vec![true, true]];
         let x = BitVec::from_bools(&[true, false, true]);
+        let solver = BoolLs::new(&matrix_from_rows(&rows));
 
-        let (h, cost) = BoolLs::new(&matrix_from_rows(&rows)).solve(&x, Method::Naive);
-        assert_eq!(cost, 0);
-        assert_eq!(h, 1, "a cout egal, le plus petit h");
+        for method in [Method::Naive, Method::Zeta] {
+            assert_eq!(solver.solve(&x, method), (1, 0), "{method:?}");
+        }
     }
 
     #[test]
@@ -321,7 +373,8 @@ mod tests {
         assert_eq!("naive".parse::<Method>().unwrap(), Method::Naive);
         assert_eq!("  NAIVE ".parse::<Method>().unwrap(), Method::Naive);
         assert_eq!(Method::default(), Method::Naive);
-        assert!("zeta".parse::<Method>().is_err());
+        assert_eq!("zeta".parse::<Method>().unwrap(), Method::Zeta);
+        assert!("zeta2".parse::<Method>().is_err());
 
         for name in Method::NAMES {
             assert!(
@@ -337,5 +390,53 @@ mod tests {
         let rows = vec![vec![true, false], vec![false, true]];
         let x = BitVec::from_bools(&[true, false, true]);
         BoolLs::new(&matrix_from_rows(&rows)).solve(&x, Method::Naive);
+    }
+
+    #[test]
+    fn zeta_matches_naive() {
+        let mut rng = Rng(5);
+        for &(m, r) in &[
+            (1usize, 1usize),
+            (7, 2),
+            (25, 4),
+            (40, 5),
+            (80, 6),
+            (200, 8),
+            (500, 10),
+        ] {
+            for _ in 0..5 {
+                let rows: Vec<Vec<bool>> = (0..m)
+                    .map(|_| (0..r).map(|_| rng.bit()).collect())
+                    .collect();
+                let solver = BoolLs::new(&matrix_from_rows(&rows));
+                let bools: Vec<bool> = (0..m).map(|_| rng.bit()).collect();
+                let x = BitVec::from_bools(&bools);
+
+                assert_eq!(
+                    solver.solve(&x, Method::Zeta),
+                    solver.solve(&x, Method::Naive),
+                    "divergence sur {m}x{r}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn zeta_matches_naive_on_extreme_densities() {
+        let mut rng = Rng(6);
+        for &(m, r) in &[(30usize, 5usize), (100, 8)] {
+            let rows: Vec<Vec<bool>> = (0..m)
+                .map(|_| (0..r).map(|_| rng.bit()).collect())
+                .collect();
+            let solver = BoolLs::new(&matrix_from_rows(&rows));
+
+            for x in [BitVec::zeros(m), BitVec::ones(m)] {
+                assert_eq!(
+                    solver.solve(&x, Method::Zeta),
+                    solver.solve(&x, Method::Naive),
+                    "densite extreme sur {m}x{r}"
+                );
+            }
+        }
     }
 }

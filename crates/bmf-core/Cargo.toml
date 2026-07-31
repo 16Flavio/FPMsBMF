@@ -13,3 +13,7 @@ criterion = "0.5"
 
 [lib]
 bench = false
+
+[[bench]]
+name = "boolls"
+harness = false
