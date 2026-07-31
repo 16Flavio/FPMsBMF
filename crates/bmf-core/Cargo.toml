@@ -7,3 +7,9 @@ edition = "2021"
 boolmat = {
     path = "../boolmat"
 }
+
+[dev-dependencies]
+criterion = "0.5"
+
+[lib]
+bench = false

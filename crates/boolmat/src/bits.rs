@@ -47,6 +47,23 @@ impl BitVec {
         bitvec
     }
 
+    pub fn from_words(words: &[Word], n: usize) -> Self {
+        assert!(n != 0, "n égale à 0");
+        assert_eq!(
+            words.len(),
+            words_for(n),
+            "{} mots fournis pour {n} bits",
+            words.len()
+        );
+
+        let mut data = words.to_vec();
+        mask_tail(&mut data, n);
+
+        let v = Self { data, n };
+        debug_assert!(v.is_canonical());
+        v
+    }
+
     // Renvoie le nombre de bit stocké
     pub fn len(&self) -> usize {
         self.n
@@ -395,5 +412,21 @@ mod tests {
             s,
             "00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000|00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000 ... (0/512) 00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000|00000000_00000000_00000000_00000000_00000000_00000000_00000000_00000000"
         );
+    }
+
+    #[test]
+    fn from_words_roundtrip() {
+        for n in [1, 63, 64, 65, 127, 128, 137] {
+            let bools: Vec<bool> = (0..n).map(|i| i % 3 == 0).collect();
+            let bv = BitVec::from_bools(&bools);
+            assert_eq!(BitVec::from_words(bv.as_words(), n), bv, "n = {n}");
+        }
+    }
+
+    #[test]
+    fn from_words_cleans_the_tail() {
+        let v = BitVec::from_words(&[Word::MAX, Word::MAX], 65);
+        assert_eq!(v.count_ones(), 65);
+        assert!(v.is_canonical());
     }
 }
