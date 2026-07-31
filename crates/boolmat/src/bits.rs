@@ -11,6 +11,7 @@ pub struct BitVec {
 impl BitVec {
     // Constructeur pour construire la matrice remplie de 0
     pub fn zeros(n: usize) -> Self {
+        assert!(n != 0, "n égale à 0");
         Self {
             data: vec![0; words_for(n)],
             n,
@@ -19,6 +20,7 @@ impl BitVec {
 
     // Constructeur pour construire la matrice remplie de 1
     pub fn ones(n: usize) -> Self {
+        assert!(n != 0, "n égale à 0");
         let mut data = vec![Word::MAX; words_for(n)];
 
         mask_tail(&mut data, n);
@@ -48,11 +50,6 @@ impl BitVec {
     // Renvoie le nombre de bit stocké
     pub fn len(&self) -> usize {
         self.n
-    }
-
-    // Renvoie un booléen true si la liste est vide, false à l'inverse
-    pub fn is_empty(&self) -> bool {
-        self.n == 0
     }
 
     // Renvoie en "brut" la liste de mots
@@ -150,9 +147,6 @@ impl BitVec {
 
     // Fonction interne qui vérifie que les derniers bits du dernier mot valent 0, s'ils ne sont pas nécessaire
     fn is_canonical(&self) -> bool {
-        if self.data.is_empty() {
-            return true;
-        }
         let last_word: Word = *self.data.last().unwrap();
         (last_word & (!tail_mask(self.n))) == 0
     }
@@ -180,16 +174,12 @@ impl fmt::Display for BitVec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let n = self.n;
 
-        if n != 0 {
-            if n <= 256 {
-                self.display_seq_bit(0, n, f)?;
-            } else {
-                self.display_seq_bit(0, 128, f)?;
-                write!(f, " ... ({}/{}) ", self.count_ones(), n)?;
-                self.display_seq_bit(n - 128, n, f)?;
-            }
+        if n <= 256 {
+            self.display_seq_bit(0, n, f)?;
         } else {
-            write!(f, "<empty>")?;
+            self.display_seq_bit(0, 128, f)?;
+            write!(f, " ... ({}/{}) ", self.count_ones(), n)?;
+            self.display_seq_bit(n - 128, n, f)?;
         }
 
         Ok(())
@@ -227,7 +217,7 @@ mod tests {
 
     #[test]
     fn ones_test() {
-        for n in 0..2000 {
+        for n in 1..2000 {
             let bv = BitVec::ones(n);
             assert_eq!(bv.len(), n);
             let mut sum: usize = 0;
@@ -240,7 +230,7 @@ mod tests {
 
     #[test]
     fn zeros_test() {
-        for n in 0..2000 {
+        for n in 1..2000 {
             let bv = BitVec::zeros(n);
             let mut sum: usize = 0;
             for word in bv.as_words() {

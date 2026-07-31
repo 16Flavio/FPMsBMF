@@ -4,3 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+
+[features]
+reference = []
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "ops"
+harness = false
+
+[[bench]]
+name = "vs_reference"
+harness = false
+required-features = ["reference"]
