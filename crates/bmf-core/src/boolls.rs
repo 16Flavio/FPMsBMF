@@ -2,15 +2,53 @@ use boolmat::{BitMatrix, BitVec, Word, NUMBER_OF_BITS};
 use std::fmt;
 use std::str::FromStr;
 
+pub(crate) struct Rng(u64);
+
+impl Rng {
+    pub(crate) fn new(seed: u64) -> Self {
+        Self(seed)
+    }
+
+    pub(crate) fn next(&mut self) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        self.0 >> 33
+    }
+
+    fn below(&mut self, n: usize) -> usize {
+        (self.next() % n as u64) as usize
+    }
+
+    fn bit(&mut self) -> bool {
+        self.next() & 1 == 1
+    }
+}
+
+fn ceil_log2(r: usize) -> usize {
+    if r <= 1 {
+        0
+    } else {
+        usize::BITS as usize - (r - 1).leading_zeros() as usize
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Method {
     #[default]
     Naive,
     Zeta,
+    Greedy,
+    GreedyLs,
 }
 
 impl Method {
-    pub const NAMES: &'static [&'static str] = &["naive", "zeta"];
+    pub const NAMES: &'static [&'static str] = &["naive", "zeta", "greedy", "greedy-ls"];
+
+    pub fn is_exact(self) -> bool {
+        matches!(self, Method::Naive | Method::Zeta)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -36,6 +74,8 @@ impl FromStr for Method {
         match s.trim().to_ascii_lowercase().as_str() {
             "naive" => Ok(Method::Naive),
             "zeta" => Ok(Method::Zeta),
+            "greedy" => Ok(Method::Greedy),
+            "greedy-ls" => Ok(Method::GreedyLs),
             _ => Err(InvalidMethod(s.to_string())),
         }
     }
@@ -46,6 +86,7 @@ pub struct BoolLs {
     r: usize,
     patterns: Vec<Word>,
     cnt: Vec<u32>,
+    cols: Vec<BitVec>,
 }
 
 impl BoolLs {
@@ -71,15 +112,26 @@ impl BoolLs {
             cnt[p as usize] += 1;
         }
 
+        let mut cols = Vec::with_capacity(r);
+        let w_t = w.transpose();
+        for k in 0..r {
+            cols.push(BitVec::from_words(w_t.row(k), m));
+        }
+
         Self {
             m,
             r,
             patterns,
             cnt,
+            cols,
         }
     }
 
     pub fn solve(&self, x: &BitVec, method: Method) -> (Word, usize) {
+        self.solve_seeded(x, method, 0)
+    }
+
+    pub fn solve_seeded(&self, x: &BitVec, method: Method, seed: u64) -> (Word, usize) {
         assert_eq!(
             x.len(),
             self.m,
@@ -90,6 +142,8 @@ impl BoolLs {
         match method {
             Method::Naive => self.solve_naive(x),
             Method::Zeta => self.solve_zeta(x),
+            Method::Greedy => self.solve_greedy(x),
+            Method::GreedyLs => self.solve_greedy_ls(x, seed),
         }
     }
 
@@ -159,26 +213,113 @@ impl BoolLs {
 
         (best_h, best_cost)
     }
+
+    fn solve_greedy(&self, x: &BitVec) -> (Word, usize) {
+        let r = self.r;
+        let m = self.m;
+
+        let mut best_z = BitVec::zeros(m);
+        let mut best_h: Word = 0;
+        let mut best_cost: usize = x.count_ones();
+
+        loop {
+            let h = best_h;
+            let mut upgrade = false;
+
+            let mut temp_h = best_h;
+            let mut temp_cost = best_cost;
+            let mut temp_z = best_z.clone();
+
+            for k in 0..r {
+                let mask = 1 << k;
+                if h & mask == 0 {
+                    let mut z = best_z.clone();
+                    z.or(&self.cols[k]);
+                    let cost = z.hamming(x);
+                    if cost < temp_cost {
+                        temp_cost = cost;
+                        temp_h = h | mask;
+                        temp_z = z.clone();
+                        upgrade = true;
+                    }
+                }
+            }
+
+            if !upgrade {
+                break;
+            } else {
+                best_cost = temp_cost;
+                best_h = temp_h;
+                best_z = temp_z.clone();
+            }
+        }
+
+        (best_h, best_cost)
+    }
+
+    fn solve_greedy_ls(&self, x: &BitVec, seed: u64) -> (Word, usize) {
+        let (h, cost) = self.solve_greedy(x);
+
+        let t = self.r;
+        let q = ceil_log2(self.r).max(2).min(self.r);
+
+        let mut rng = Rng::new(seed);
+        self.local_search(x, h, cost, t, q, &mut rng)
+    }
+
+    fn local_search(
+        &self,
+        x: &BitVec,
+        h: Word,
+        cost: usize,
+        t: usize,
+        q: usize,
+        rng: &mut Rng,
+    ) -> (Word, usize) {
+        if t == 0 {
+            return (h, cost);
+        }
+
+        let mut h = h;
+        let mut cost = cost;
+
+        for _ in 0..t {
+            for k in 2..=q {
+                let cand = h ^ self.random_mask(k, rng);
+                let cand_cost = self.cost_of(x, cand);
+                if cand_cost < cost {
+                    (h, cost) = self.local_search(x, cand, cand_cost, t - 1, q, rng);
+                }
+            }
+        }
+
+        (h, cost)
+    }
+
+    fn random_mask(&self, k: usize, rng: &mut Rng) -> Word {
+        debug_assert!(k <= self.r, "poids {k} impossible sur {} bits", self.r);
+        let mut u: Word = 0;
+        while (u.count_ones() as usize) < k {
+            u |= 1 << rng.below(self.r);
+        }
+        u
+    }
+
+    fn cost_of(&self, x: &BitVec, h: Word) -> usize {
+        let mut z = BitVec::zeros(self.m);
+        let mut bits = h;
+        while bits != 0 {
+            let k = bits.trailing_zeros() as usize;
+            z.or(&self.cols[k]);
+            bits &= bits - 1;
+        }
+        z.hamming(x)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    struct Rng(u64);
-
-    impl Rng {
-        fn next(&mut self) -> u64 {
-            self.0 = self
-                .0
-                .wrapping_mul(6364136223846793005)
-                .wrapping_add(1442695040888963407);
-            self.0 >> 33
-        }
-        fn bit(&mut self) -> bool {
-            self.next() & 1 == 1
-        }
-    }
 
     fn matrix_from_rows(rows: &[Vec<bool>]) -> BitMatrix {
         let refs: Vec<&[bool]> = rows.iter().map(|r| r.as_slice()).collect();
@@ -276,6 +417,12 @@ mod tests {
             assert_eq!(cost, 3, "{method:?} : l'optimum vaut 3");
             assert_eq!(h, 3, "{method:?} :  les deux colonnes");
         }
+
+        assert_eq!(
+            solver.solve(&x, Method::Greedy),
+            (0, 4),
+            "le glouton echoue ici"
+        );
     }
 
     #[test]
@@ -437,6 +584,78 @@ mod tests {
                     "densite extreme sur {m}x{r}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn heuristics_report_consistent_costs() {
+        let mut rng = Rng(7);
+        for &(m, r) in &[(20usize, 4usize), (60, 6), (150, 8), (300, 10)] {
+            let rows: Vec<Vec<bool>> = (0..m)
+                .map(|_| (0..r).map(|_| rng.bit()).collect())
+                .collect();
+            let w = matrix_from_rows(&rows);
+            let solver = BoolLs::new(&w);
+            let bools: Vec<bool> = (0..m).map(|_| rng.bit()).collect();
+            let x = BitVec::from_bools(&bools);
+
+            for method in [Method::Greedy, Method::GreedyLs] {
+                let (h, cost) = solver.solve(&x, method);
+                assert!(
+                    h < (1 << r),
+                    "{method:?} : h = {h} hors domaine sur {m}x{r}"
+                );
+                assert_eq!(
+                    cost,
+                    cost_via_product(&w, &x, h),
+                    "{method:?} : cout annonce faux pour h = {h} sur {m}x{r}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn heuristics_are_sandwiched() {
+        let mut rng = Rng(8);
+        for &(m, r) in &[(20usize, 4usize), (60, 6), (150, 8), (300, 10)] {
+            for _ in 0..3 {
+                let rows: Vec<Vec<bool>> = (0..m)
+                    .map(|_| (0..r).map(|_| rng.bit()).collect())
+                    .collect();
+                let solver = BoolLs::new(&matrix_from_rows(&rows));
+                let bools: Vec<bool> = (0..m).map(|_| rng.bit()).collect();
+                let x = BitVec::from_bools(&bools);
+
+                let exact = solver.solve(&x, Method::Zeta).1;
+                let ls = solver.solve(&x, Method::GreedyLs).1;
+                let greedy = solver.solve(&x, Method::Greedy).1;
+
+                assert!(exact <= ls, "{m}x{r} : exact {exact} > greedy-ls {ls}");
+                assert!(ls <= greedy, "{m}x{r} : greedy-ls {ls} > greedy {greedy}");
+                assert!(
+                    greedy <= x.count_ones(),
+                    "{m}x{r} : greedy {greedy} > |x| = {}",
+                    x.count_ones()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn greedy_ls_is_reproducible() {
+        let mut rng = Rng(9);
+        let (m, r) = (200usize, 8usize);
+        let rows: Vec<Vec<bool>> = (0..m)
+            .map(|_| (0..r).map(|_| rng.bit()).collect())
+            .collect();
+        let solver = BoolLs::new(&matrix_from_rows(&rows));
+        let bools: Vec<bool> = (0..m).map(|_| rng.bit()).collect();
+        let x = BitVec::from_bools(&bools);
+
+        for seed in [0u64, 1, 42, 12345] {
+            let a = solver.solve_seeded(&x, Method::GreedyLs, seed);
+            let b = solver.solve_seeded(&x, Method::GreedyLs, seed);
+            assert_eq!(a, b, "graine {seed} : resultats differents");
         }
     }
 }
