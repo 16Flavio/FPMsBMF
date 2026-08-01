@@ -418,6 +418,26 @@ impl BitMatrix {
         t
     }
 
+    pub fn set_row(&mut self, i: usize, words: &[Word]) {
+        assert!(
+            i < self.rows,
+            "ligne {i} hors limites (rows = {})",
+            self.rows
+        );
+        assert_eq!(
+            words.len(),
+            self.stride,
+            "{} mots pour un stride de {}",
+            words.len(),
+            self.stride
+        );
+        let (stride, cols) = (self.stride, self.cols);
+        let row = &mut self.data[i * stride..(i + 1) * stride];
+        row.copy_from_slice(words);
+        mask_tail(row, cols);
+        debug_assert!(self.row_is_canonical(i));
+    }
+
     pub(crate) fn row_mut(&mut self, i: usize) -> &mut [Word] {
         assert!(
             i < self.rows,

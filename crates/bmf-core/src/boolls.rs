@@ -17,7 +17,7 @@ impl Rng {
         self.0 >> 33
     }
 
-    fn below(&mut self, n: usize) -> usize {
+    pub(crate) fn below(&mut self, n: usize) -> usize {
         (self.next() % n as u64) as usize
     }
 
