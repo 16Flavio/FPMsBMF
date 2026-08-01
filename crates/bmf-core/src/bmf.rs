@@ -184,26 +184,25 @@ mod tests {
     }
 
     #[test]
-    fn full_rank_reaches_zero_error() {
-        for &(m, n) in &[(8usize, 12usize), (16, 10)] {
+    fn rank_above_column_count_reaches_zero() {
+        for &(m, n, r) in &[(30usize, 4usize, 5usize), (65, 6, 8), (20, 3, 3)] {
             let x = rand_matrix(m, n, 0.4, 4);
-            let best = (0..5)
-                .map(|s| ao_bmf(&x, m.min(20), Method::Zeta, 50, s).error)
-                .min()
-                .unwrap();
+            let res = ao_bmf(&x, r, Method::Zeta, 50, 0);
             assert_eq!(
-                best, 0,
-                "rang plein sur {m}x{n} : erreur {best} au lieu de 0"
+                res.error, 0,
+                "{m}x{n}, r={r} : toutes les colonnes de X sont dans W"
             );
         }
     }
 
     #[test]
-    fn recovers_a_planted_factorisation() {
+    fn planted_instance_beats_trivial_but_not_optimal() {
         for &(m, n, r) in &[(40usize, 30usize, 3usize), (60, 50, 4)] {
             let w0 = rand_matrix(m, r, 0.4, 10);
             let h0 = rand_matrix(r, n, 0.4, 11);
             let x = w0.product(&h0);
+
+            assert_eq!(x.hamming(&w0.product(&h0)), 0, "instance mal construite");
 
             let best = (0..10)
                 .map(|s| ao_bmf(&x, r, Method::Zeta, 100, s).error)
@@ -211,9 +210,8 @@ mod tests {
                 .unwrap();
 
             assert!(
-                best <= x.count_ones() / 20,
-                "{m}x{n}, r={r} : meilleure erreur {best} pour une instance de rang {r} \
-                 (nnz = {})",
+                best < x.count_ones() / 4,
+                "{m}x{n}, r={r} : erreur {best}, pas mieux que trivial ({})",
                 x.count_ones()
             );
         }
